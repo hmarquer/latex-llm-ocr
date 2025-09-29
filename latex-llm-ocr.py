@@ -3,7 +3,6 @@ import sys
 import base64
 from pathlib import Path
 from typing import Optional
-from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 import prompts
 import argparse
@@ -20,7 +19,7 @@ MAX_FILE_SIZE_MB = 20  # Límite de tamaño de archivo en MB
 
 def load_openai_client() -> OpenAI:
     """Carga el cliente de OpenAI con validación de API key."""
-    _ = load_dotenv(find_dotenv())
+    # _ = load_dotenv(find_dotenv())
     api_key = os.environ.get('GITHUB_API_KEY')
     
     if not api_key:
