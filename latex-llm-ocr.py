@@ -2,7 +2,7 @@ import os
 import sys
 import base64
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from openai import OpenAI
 import prompts
 import argparse
@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 import platform
+from pdf2image import convert_from_path
 
 # Configuración
 SUPPORTED_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
@@ -278,7 +279,103 @@ def extract_pdf_text(pdf_path: Path) -> str:
         print(f"Error al procesar el PDF: {e}", file=sys.stderr)
         sys.exit(1)
 
-def process_file(client: OpenAI, file_path: Path, use_tikz: bool = False) -> str:
+def convert_pdf_to_images(pdf_path: Path) -> List[Path]:
+    """Convierte un PDF a una lista de imágenes temporales."""
+    try:
+        print(f"Convirtiendo PDF a imágenes...", file=sys.stderr)
+        
+        # Crear directorio temporal para las imágenes
+        temp_dir = Path(tempfile.mkdtemp(prefix="latex_ocr_pdf_"))
+        
+        # Convertir PDF a imágenes
+        images = convert_from_path(pdf_path, dpi=300, fmt='PNG')
+        
+        image_paths = []
+        for i, image in enumerate(images, 1):
+            image_path = temp_dir / f"page_{i:03d}.png"
+            image.save(image_path, 'PNG')
+            image_paths.append(image_path)
+        
+        print(f"✓ PDF convertido a {len(image_paths)} imágenes.", file=sys.stderr)
+        return image_paths
+        
+    except Exception as e:
+        print(f"Error al convertir PDF a imágenes: {e}", file=sys.stderr)
+        print("Nota: Asegúrate de tener poppler-utils instalado:", file=sys.stderr)
+        print("  Ubuntu/Debian: sudo apt install poppler-utils", file=sys.stderr)
+        print("  macOS: brew install poppler", file=sys.stderr)
+        print("  Windows: Consulta la documentación de pdf2image", file=sys.stderr)
+        sys.exit(1)
+
+def process_pdf_as_images(client: OpenAI, pdf_path: Path, use_tikz: bool = False) -> str:
+    """Procesa un PDF como imágenes secuencialmente con contexto acumulativo."""
+    model = "gpt-4o"
+    temperature = 0.05
+    max_tokens = 4090
+    
+    try:
+        # Convertir PDF a imágenes
+        image_paths = convert_pdf_to_images(pdf_path)
+        
+        accumulated_latex = ""
+        total_pages = len(image_paths)
+        
+        for i, image_path in enumerate(image_paths, 1):
+            print(f"Procesando página {i}/{total_pages}...", file=sys.stderr)
+            
+            base64_image = encode_image(image_path)
+            
+            if i == 1:
+                # Primera página: sin contexto
+                if use_tikz:
+                    messages = prompts.messages_tikz_describer(base64_image)
+                else:
+                    messages = prompts.messages_pdf_image_first_page(base64_image)
+            else:
+                # Páginas siguientes: con contexto de páginas anteriores
+                if use_tikz:
+                    messages = prompts.messages_tikz_describer(base64_image)
+                else:
+                    messages = prompts.messages_pdf_image_with_context(base64_image, accumulated_latex)
+            
+            response = client.chat.completions.create(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                top_p=1
+            )
+            
+            page_latex = response.choices[0].message.content
+            
+            if i == 1:
+                accumulated_latex = page_latex
+            else:
+                # Agregar nueva página al contenido acumulado
+                accumulated_latex += "\n\n" + page_latex
+            
+            print(f"✓ Página {i} procesada.", file=sys.stderr)
+        
+        # Limpiar archivos temporales
+        for image_path in image_paths:
+            try:
+                image_path.unlink()
+            except:
+                pass
+        
+        # Limpiar directorio temporal
+        try:
+            image_paths[0].parent.rmdir()
+        except:
+            pass
+        
+        return accumulated_latex
+        
+    except Exception as e:
+        print(f"Error al procesar PDF como imágenes: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def process_file(client: OpenAI, file_path: Path, use_tikz: bool = False, pdf_as_images: bool = False) -> str:
     """Procesa un archivo y retorna la respuesta de OpenAI."""
     model = "gpt-4o"
     temperature = 0.05
@@ -286,8 +383,11 @@ def process_file(client: OpenAI, file_path: Path, use_tikz: bool = False) -> str
     
     try:
         if file_path.suffix.lower() == '.pdf':
-            contents = extract_pdf_text(file_path)
-            messages = prompts.messages_text(contents)
+            if pdf_as_images:
+                return process_pdf_as_images(client, file_path, use_tikz)
+            else:
+                contents = extract_pdf_text(file_path)
+                messages = prompts.messages_text(contents)
         else:
             base64_image = encode_image(file_path)
             if use_tikz:
@@ -316,11 +416,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Extensiones soportadas:
-  PDF: .pdf
+  PDF: .pdf (texto o imágenes escaneadas)
   Imágenes: {', '.join(SUPPORTED_IMAGE_EXTENSIONS)}
 
 Ejemplos:
   %(prog)s document.pdf
+  %(prog)s document.pdf --pdf-as-images
   %(prog)s image.png --tikz
   %(prog)s --screenshot
   %(prog)s --screenshot --tikz
@@ -331,6 +432,8 @@ Ejemplos:
                        help='Tomar captura de pantalla de una región')
     parser.add_argument('-t', '--tikz', action='store_true', 
                        help='Usar descripción TikZ para imágenes')
+    parser.add_argument('-p', '--pdf-as-images', action='store_true',
+                       help='Procesar PDF como imágenes escaneadas (página por página con contexto)')
     
     args = parser.parse_args()
     
@@ -339,6 +442,12 @@ Ejemplos:
         parser.error("No se puede usar --screenshot junto con un archivo específico")
     elif not args.screenshot and not args.filepath:
         parser.error("Debe proporcionar un archivo o usar --screenshot")
+    
+    if args.pdf_as_images and args.screenshot:
+        parser.error("No se puede usar --pdf-as-images con --screenshot")
+    
+    if args.pdf_as_images and args.filepath and not args.filepath.lower().endswith('.pdf'):
+        parser.error("--pdf-as-images solo se puede usar con archivos PDF")
     
     # Cargar cliente OpenAI
     client = load_openai_client()
@@ -353,7 +462,7 @@ Ejemplos:
             file_path = validate_file(args.filepath)
         
         # Procesar archivo
-        result = process_file(client, file_path, args.tikz)
+        result = process_file(client, file_path, args.tikz, args.pdf_as_images)
         
         # Mostrar resultado
         print(result)

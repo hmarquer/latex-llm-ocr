@@ -5,6 +5,7 @@ Una herramienta de línea de comandos que convierte archivos PDF e imágenes a c
 ## Características
 
 - **Conversión de PDFs**: Extrae texto de archivos PDF y lo convierte a código LaTeX
+- **PDFs escaneados**: Procesa PDFs que contienen solo imágenes (documentos escaneados) página por página con contexto acumulativo
 - **Procesamiento de imágenes**: Convierte imágenes con contenido matemático/académico a LaTeX
 - **Capturas de pantalla**: Toma capturas de región seleccionada y las procesa directamente
 - **Modo TikZ**: Genera descripciones detalladas para recrear figuras matemáticas en TikZ
@@ -18,6 +19,7 @@ Una herramienta de línea de comandos que convierte archivos PDF e imágenes a c
 - Python 3.7+
 - openai
 - PyPDF2
+- pdf2image
 
 ### Herramientas del Sistema (Opcionales)
 
@@ -27,6 +29,9 @@ Para capturas de pantalla (al menos una):
 - `gnome-screenshot`
 - `spectacle`
 - `scrot`
+
+Para conversión de PDFs a imágenes:
+- `poppler-utils`: `sudo apt install poppler-utils`
 
 Para portapapeles:
 - `xclip` (recomendado): `sudo apt install xclip`
@@ -39,6 +44,7 @@ Para notificaciones:
 - `screencapture` (incluido en el sistema)
 - `pbcopy` (incluido en el sistema)
 - `osascript` (incluido en el sistema)
+- `poppler` para PDFs: `brew install poppler`
 
 #### Windows
 - PowerShell (incluido en Windows 10+)
@@ -116,12 +122,23 @@ python latex-llm-ocr.py imagen.png -t
 python latex-llm-ocr.py --screenshot --tikz
 ```
 
+#### 6. Procesar PDF escaneado (solo imágenes)
+```bash
+python latex-llm-ocr.py documento_escaneado.pdf --pdf-as-images
+```
+
+#### 7. PDF escaneado con descripciones TikZ
+```bash
+python latex-llm-ocr.py figuras_matematicas.pdf --pdf-as-images --tikz
+```
+
 ### Opciones disponibles
 
 | Opción | Descripción |
 |--------|-------------|
 | `-s, --screenshot` | Toma una captura de pantalla de región seleccionada |
 | `-t, --tikz` | Genera descripción detallada para recrear figuras en TikZ |
+| `-p, --pdf-as-images` | Procesa PDF como imágenes escaneadas (página por página con contexto) |
 | `-h, --help` | Muestra la ayuda completa |
 
 ## Formatos soportados
@@ -139,7 +156,9 @@ python latex-llm-ocr.py --screenshot --tikz
 
 ### Limitaciones
 - Tamaño máximo de archivo: 20 MB
-- Los archivos PDF se procesan extrayendo el texto, no como imágenes
+- Los archivos PDF se procesan extrayendo el texto por defecto
+- Para PDFs escaneados (solo imágenes), usar la opción `--pdf-as-images`
+- El procesamiento de PDFs como imágenes puede ser más lento debido al procesamiento secuencial
 
 ## Funcionalidades del código LaTeX generado
 
@@ -157,7 +176,7 @@ El código LaTeX generado sigue estas convenciones:
 - `teo` - Teoremas
 - `prop` - Proposiciones
 - `cor` - Corolarios
-- `lem` - Lemmas
+- `lem` - Lemas
 - `defn` - Definiciones
 - `obs` - Observaciones
 - `sol` - Soluciones
@@ -194,6 +213,8 @@ latex-llm-ocr.py          # Script principal
 ├── send_notification()   # Notificaciones del sistema
 ├── encode_image()        # Codificación base64
 ├── extract_pdf_text()    # Extracción de texto PDF
+├── convert_pdf_to_images() # Conversión PDF a imágenes
+├── process_pdf_as_images() # Procesamiento secuencial con contexto
 └── process_file()        # Procesamiento con IA
 
 prompts.py                # Módulo de prompts
@@ -201,7 +222,9 @@ prompts.py                # Módulo de prompts
 ├── SYSTEM_PROMPTS        # Prompts del sistema
 ├── messages_image()      # Prompts para imágenes
 ├── messages_text()       # Prompts para texto PDF
-└── messages_tikz_describer() # Prompts para TikZ
+├── messages_tikz_describer() # Prompts para TikZ
+├── messages_pdf_image_first_page() # Primera página PDF escaneado
+└── messages_pdf_image_with_context() # Páginas subsecuentes con contexto
 ```
 
 ## Nota sobre costos

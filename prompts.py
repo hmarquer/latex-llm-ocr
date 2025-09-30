@@ -153,6 +153,97 @@ def messages_tikz_describer(base64_image: str) -> List[Dict[str, Any]]:
         }
     ]
 
+def messages_pdf_image_first_page(base64_image: str) -> List[Dict[str, Any]]:
+    """
+    Genera mensajes para convertir la primera página de un PDF escaneado a código LaTeX.
+    
+    Args:
+        base64_image: Imagen de la primera página codificada en base64
+        
+    Returns:
+        Lista de mensajes para la API de OpenAI
+    """
+    if not base64_image:
+        raise ValueError("base64_image no puede estar vacío")
+    
+    return [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPTS["latex_generator"],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"This is the first page of a scanned PDF document. "
+                        f"Write the LaTeX code for this page. This page will be followed by more pages, "
+                        f"so ensure the content flows naturally and can be continued. "
+                        f"{STANDARD_INSTRUCTIONS}"
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                }
+            ]
+        }
+    ]
+
+def messages_pdf_image_with_context(base64_image: str, previous_latex: str) -> List[Dict[str, Any]]:
+    """
+    Genera mensajes para convertir una página subsecuente de un PDF escaneado con contexto.
+    
+    Args:
+        base64_image: Imagen de la página actual codificada in base64
+        previous_latex: Código LaTeX de las páginas anteriores
+        
+    Returns:
+        Lista de mensajes para la API de OpenAI
+    """
+    if not base64_image:
+        raise ValueError("base64_image no puede estar vacío")
+    
+    if not previous_latex or not previous_latex.strip():
+        raise ValueError("previous_latex no puede estar vacío")
+    
+    # Truncar el contexto si es demasiado largo para evitar límites de tokens
+    max_context_length = 2000
+    if len(previous_latex) > max_context_length:
+        # Tomar los últimos caracteres para mantener el contexto más reciente
+        previous_latex = "..." + previous_latex[-max_context_length:]
+    
+    return [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPTS["latex_generator"],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"This is a continuation page from a scanned PDF document. "
+                        f"Below is the LaTeX code from the previous pages:\n\n"
+                        f"--- PREVIOUS PAGES CONTEXT ---\n"
+                        f"{previous_latex}\n"
+                        f"--- END CONTEXT ---\n\n"
+                        f"Now write the LaTeX code for this new page, ensuring it continues "
+                        f"naturally from the previous content. Maintain consistency in notation, "
+                        f"formatting, and mathematical style. Only provide the LaTeX code for THIS page. "
+                        f"{STANDARD_INSTRUCTIONS}"
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                }
+            ]
+        }
+    ]
+
 # Funciones auxiliares para personalización futura
 def get_custom_latex_instructions(additional_rules: List[str] = None) -> str:
     """
